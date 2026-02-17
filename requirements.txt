@@ -1,2 +1,8 @@
 streamlit
+google-analytics-data
+google-auth
 pandas
+plotly
+pytz
+requests
+flask
