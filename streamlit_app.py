@@ -124,7 +124,6 @@ st.markdown("""
 
 # ---------------- AUTHENTICATION & CACHING ----------------
 @st.cache_resource
-@st.cache_resource
 def get_ga4_client():
     # 1. Try Local File (Best for local dev)
     if os.path.exists(KEY_PATH):
@@ -529,7 +528,7 @@ def get_kajabi_new_customers(target_month_start, target_month_end):
     if not token:
         return 0, [], 0 # count, list, total_active_placeholder
 
-    url = "https://api.kajabi.com/v1/customers" # Changed from contacts
+    url = "https://api.kajabi.com/v1/customers" 
     headers = {"Authorization": f"Bearer {token}"}
     
     # Precise Timezone Handling (IST -> UTC)
@@ -542,11 +541,9 @@ def get_kajabi_new_customers(target_month_start, target_month_end):
     
     all_customers = []
     # Add include=offers to fetch enrollments for course count
-    # Note: Customers endpoint supports include=offers too
     next_url = f"{url}?limit=100&include=offers" 
     
-    # Safe limit to prevent infinite loops
-    max_pages = 20 
+    max_pages = 50 # Increased limit, but we rely on early break
     page_count = 0
     total_global_count = 0 
     
@@ -556,66 +553,74 @@ def get_kajabi_new_customers(target_month_start, target_month_end):
             if resp.status_code != 200: break
             
             data = resp.json()
-            # Capture total from meta on first page
             if page_count == 0:
                 total_global_count = data.get('meta', {}).get('total', 0)
                 
             batch = data.get('data', []) 
-            
             if not batch: break
-            all_customers.extend(batch)
             
-            # Pagination
+            # Optimization: Check dates to stop early
+            # Customers are sorted by 'updated_at' DESC.
+            # If updated_at < start_date, then created_at must also be < start_date.
+            should_stop = False
+            
+            for c in batch:
+                attributes = c.get('attributes', {})
+                
+                # Check Updated At for early exit
+                u_str = attributes.get('updated_at')
+                if u_str:
+                    try:
+                        u_date = datetime.fromisoformat(u_str.replace('Z', '+00:00'))
+                        u_date_ist = u_date.astimezone(ist)
+                        if u_date_ist < dt_start_ist:
+                            should_stop = True
+                    except: pass
+
+                # Check Created At for filtering
+                c_date_str = attributes.get('created_at')
+                if c_date_str:
+                    try:
+                        c_date = datetime.fromisoformat(c_date_str.replace('Z', '+00:00'))
+                        c_date_ist = c_date.astimezone(ist)
+                        
+                        if dt_start_ist <= c_date_ist <= dt_end_ist:
+                            all_customers.append(c)
+                    except: pass
+            
+            if should_stop:
+                break
+            
             links = data.get('links', {})
             next_url = links.get('next')
             page_count += 1
             
         except: break
 
-    # Filter by Date
-    filtered_customers = []
-    for c in all_customers:
-        attributes = c.get('attributes', {})
-        c_date_str = attributes.get('created_at') # ISO format
-        if c_date_str:
-            # Parse ISO (Handle Z or offsets)
-            try:
-                c_date = datetime.fromisoformat(c_date_str.replace('Z', '+00:00'))
-                # Convert to IST for comparison
-                c_date_ist = c_date.astimezone(ist)
-                
-                if dt_start_ist <= c_date_ist <= dt_end_ist:
-                    filtered_customers.append(c)
-            except: pass
-            
-    return len(filtered_customers), filtered_customers, total_global_count
-    
+    return len(all_customers), all_customers, total_global_count
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_kajabi_active_customers(start_date):
     """
     Fetch counts of active customers based on 'last_request_at'.
     Since API sorts by 'updated_at' desc, we fetch until updated_at < start_date.
-    Note: Historical active counts (Prev Month) are impossible to get accurately
-    because last_request_at is a current snapshot. Useful for MTD only.
     """
     token = get_kajabi_token()
     if not token: return 0, 0
     
-    url = "https://api.kajabi.com/v1/customers" # Note: Customers endpoint
+    url = "https://api.kajabi.com/v1/customers"
     headers = {"Authorization": f"Bearer {token}"}
     
     ist = pytz.timezone('Asia/Kolkata')
     dt_limit = datetime.combine(start_date, datetime.min.time())
     dt_limit_ist = ist.localize(dt_limit)
     
-    # Also fetch total count from meta
     total_customers = 0
-    
     active_count = 0
     next_url = f"{url}?limit=100"
     page = 0
     
-    while next_url and page < 50: # Safety limit
+    while next_url and page < 50:
         try:
             resp = requests.get(next_url, headers=headers)
             if resp.status_code != 200: break
@@ -627,7 +632,6 @@ def get_kajabi_active_customers(start_date):
             batch = data.get('data', [])
             if not batch: break
             
-            # Check timestamps
             stop_fetching = False
             for c in batch:
                 attrs = c.get('attributes', {})
@@ -674,9 +678,11 @@ def get_kajabi_sales(target_month_start, target_month_end):
     dt_end = datetime.combine(target_month_end, datetime.max.time())
     dt_end_ist = ist.localize(dt_end)
     
-    all_purchases = []
+    filtered_purchases = []
+    revenue = 0.0
+    
     next_url = f"{url}?limit=100"
-    max_pages = 20
+    max_pages = 50 # Increased limit allowed due to optimization
     page_count = 0
     
     while next_url and page_count < max_pages:
@@ -687,31 +693,38 @@ def get_kajabi_sales(target_month_start, target_month_end):
             batch = data.get('data', [])
             if not batch: break
             
-            all_purchases.extend(batch)
+            should_stop = False
+            
+            for p in batch:
+                attrs = p.get('attributes', {})
+                p_date_str = attrs.get('created_at')
+                if p_date_str:
+                    try:
+                        p_date = datetime.fromisoformat(p_date_str.replace('Z', '+00:00'))
+                        p_date_ist = p_date.astimezone(ist)
+                        
+                        # OPTIMIZATION: Purchases are sorted by created_at DESC.
+                        # If we see a purchase older than start_date, we can STOP ALL FETCHING.
+                        if p_date_ist < dt_start_ist:
+                            should_stop = True
+                            continue # Check next msg? No, just stop processing this batch validly, then break.
+                            # Actually, if we hit one older, all subsequent in this batch and next pages are older.
+                        
+                        if dt_start_ist <= p_date_ist <= dt_end_ist:
+                            amount = float(attrs.get('amount_in_cents', 0) or 0) / 100
+                            revenue += amount
+                            p['parsed_date'] = p_date_ist 
+                            p['amount_val'] = amount
+                            filtered_purchases.append(p)
+                    except: pass
+            
+            if should_stop:
+                break
             
             links = data.get('links', {})
             next_url = links.get('next')
             page_count += 1
         except: break
-        
-    revenue = 0.0
-    filtered_purchases = []
-    
-    for p in all_purchases:
-        attrs = p.get('attributes', {})
-        p_date_str = attrs.get('created_at')
-        if p_date_str:
-            try:
-                p_date = datetime.fromisoformat(p_date_str.replace('Z', '+00:00'))
-                p_date_ist = p_date.astimezone(ist)
-                
-                if dt_start_ist <= p_date_ist <= dt_end_ist:
-                    amount = float(attrs.get('amount_in_cents', 0) or 0) / 100
-                    revenue += amount
-                    p['parsed_date'] = p_date_ist # Store for charting
-                    p['amount_val'] = amount
-                    filtered_purchases.append(p)
-            except: pass
             
     return revenue, filtered_purchases
 
@@ -865,78 +878,49 @@ with tabs[3]:
 
     st.caption(f"Data Source: Kajabi API > Contacts & Purchases")
 # --- TAB 5: RENEW (HubSpot Contacts) ---
-try:
-    HUBSPOT_CONTACT_TOKEN = st.secrets["hubspot"]["token"] # Reuse the same token
-except:
-    st.error("Missing HubSpot Token in .streamlit/secrets.toml")
-    st.stop()
+# --- TAB 5: RENEW (Google Sheet Data) ---
+# Replace this with your Web App URL from the deployment step
+RENEW_SHEET_URL = "https://script.google.com/macros/s/AKfycbzBauk14TmX8S8FdsUTWqjUoF3_o3FE66rA2EkMQOCjgofa8avMa2U8dYF8al4B9A/exec" 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def get_hubspot_upselling_data(target_month_start, target_month_end):
-    """Fetch count and total revenue of contacts with Lead Status = UPSELLING created in range"""
-    url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
-    headers = {"Authorization": f"Bearer {HUBSPOT_CONTACT_TOKEN}", "Content-Type": "application/json"}
-    
-    # Precise Timezone Handling (IST -> UTC)
-    ist = pytz.timezone('Asia/Kolkata')
-    dt_start = datetime.combine(target_month_start, datetime.min.time())
-    dt_start_ist = ist.localize(dt_start)
-    start_ts = int(dt_start_ist.astimezone(pytz.UTC).timestamp() * 1000)
-    
-    dt_end = datetime.combine(target_month_end, datetime.max.time())
-    dt_end_ist = ist.localize(dt_end)
-    end_ts = int(dt_end_ist.astimezone(pytz.UTC).timestamp() * 1000)
-    
-    body = {
-        "filterGroups": [{
-            "filters": [
-                {
-                    "propertyName": "hs_lead_status",
-                    "operator": "EQ",
-                    "value": "UPSELLING"
-                },
-                {
-                    "propertyName": "createdate", 
-                    "operator": "BETWEEN",
-                    "value": start_ts,
-                    "highValue": end_ts
-                }
-            ]
-        }],
-        "properties": ["total_revenue"],
-        "limit": 100
-    }
-    
-    total_rev = 0.0
-    count = 0
-    after = None
-    
-    while True:
-        if after: body['after'] = after
-        try:
-            response = requests.post(url, headers=headers, json=body)
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                count += len(results)
-                for c in results:
-                    rev = c['properties'].get('total_revenue')
-                    if rev:
-                        total_rev += float(rev)
-                
-                if 'paging' in data and 'next' in data['paging']:
-                    after = data['paging']['next']['after']
-                else: break
-            else: break
-        except: break
-
-    return count, total_rev
+def get_renew_sheet_data(target_month_start, target_month_end):
+    if "script.google.com" not in RENEW_SHEET_URL:
+        return 0, 0, pd.DataFrame() # Placeholder until user adds URL
+        
+    try:
+        response = requests.get(RENEW_SHEET_URL)
+        data = response.json()
+        df = pd.DataFrame(data)
+        
+        # Ensure numeric fee
+        df['Fee Amount'] = pd.to_numeric(df['Fee Amount'], errors='coerce').fillna(0)
+        
+        # Parse Dates
+        df['Payment Paid Date'] = pd.to_datetime(df['Payment Paid Date'], errors='coerce').dt.date
+        
+        # Filter MTD
+        mask = (df['Payment Paid Date'] >= target_month_start) & (df['Payment Paid Date'] <= target_month_end)
+        df_filtered = df.loc[mask]
+        
+        total_rev = df_filtered['Fee Amount'].sum()
+        count = len(df_filtered)
+        
+        return count, total_rev, df_filtered
+    except Exception as e:
+        st.error(f"Error fetching sheet: {e}")
+        return 0, 0, pd.DataFrame()
 
 with tabs[4]: 
-    st.markdown("### 🔄 Retention & Upsell (HubSpot)")
+    st.markdown("### 🔄 Retention & Renewals (Google Sheet)")
     
-    m1_count, m1_val = get_hubspot_upselling_data(date_m1_start, date_m1_end)
-    m2_count, m2_val = get_hubspot_upselling_data(date_m2_start, date_m2_end)
+    # Input for URL if placeholder
+    if "AKfycbx" in RENEW_SHEET_URL:
+        new_url = st.text_input("Paste your Google Script Web App URL here:", key="sheet_url_input")
+        if new_url:
+            RENEW_SHEET_URL = new_url # Helper for session
+            
+    m1_count, m1_val, m1_df = get_renew_sheet_data(date_m1_start, date_m1_end)
+    m2_count, m2_val, _ = get_renew_sheet_data(date_m2_start, date_m2_end)
     
     delta_count = m1_count - m2_count
     delta_val = m1_val - m2_val
@@ -944,16 +928,25 @@ with tabs[4]:
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
-        st.metric("New Upsell Opportunities", f"{m1_count}", f"{delta_count:+}")
+        st.metric("Renewals (MTD)", f"{m1_count}", f"{delta_count:+}")
     with kpi2:
         st.metric("Previous MTD Count", f"{m2_count}")
     with kpi3:
-        st.metric("Potential Revenue (MTD)", f"₹{m1_val:,.0f}", f"{val_pct:+.1f}%")
+        st.metric("Renewal Revenue", f"₹{m1_val:,.0f}", f"{val_pct:+.1f}%")
     with kpi4:
         st.metric("Previous MTD Revenue", f"₹{m2_val:,.0f}")
         
     st.markdown("---")
-    st.caption("Data Source: HubSpot Contacts > Lead Status: 'UPSELLING' (Created MTD) > Property: 'total_revenue'")
+    
+    if not m1_df.empty:
+        st.markdown("**Recent Renewals**")
+        st.dataframe(
+            m1_df[["Student Name", "Course", "Lead Owner", "Fee Amount", "Payment Paid Date"]],
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No renewals found for this period (or Check URL).")
 
 with tabs[5]: show_placeholder("Advocate", "❤️", "NPS & Referral Data Pending")
 
