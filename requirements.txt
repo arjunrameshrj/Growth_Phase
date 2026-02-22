@@ -1,8 +1,9 @@
-streamlit
-google-analytics-data
-google-auth
+flask
+flask-caching
+toml
 pandas
 plotly
-pytz
+google-analytics-data
+google-auth
 requests
-flask
+pytz
