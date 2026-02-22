@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Growth Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: { primary: '#3b82f6', secondary: '#64748b' }
+                }
+            }
+        }
+    </script>
+    <style>
+        .skeleton {
+            background: #e2e8f0;
+            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 0.375rem;
+        }
+
+        .dark .skeleton {
+            background: #334155;
+            background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%);
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        .content-loaded {
+            display: none;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 dark:bg-slate-900 min-h-screen transition-colors duration-300">
+
+    <!-- Navigation Bar -->
+    <nav
+        class="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 transition-colors duration-300">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center gap-4">
+                    <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Tiju's Academy Logo"
+                        class="h-10 w-auto rounded-md shadow-sm">
+                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Growth Command Center</h1>
+                    <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Monthly Performance Review</span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <!-- Dark Mode Toggle -->
+                    <button onclick="toggleDarkMode()"
+                        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 transition-colors">
+                        <i class="fas fa-moon dark:hidden"></i>
+                        <i class="fas fa-sun hidden dark:block text-yellow-400"></i>
+                    </button>
+
+                    <div class="flex items-center bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
+                        <a href="{{ url_for('index', offset=month_offset + 1) }}"
+                            class="p-2 hover:bg-white dark:hover:bg-slate-600 rounded-md transition-colors text-gray-500 dark:text-gray-300 hover:text-primary"><i
+                                class="fas fa-chevron-left"></i></a>
+                        <div class="flex flex-col items-center px-4">
+                            <span class="font-semibold text-primary dark:text-blue-400">{{ current_month }}</span>
+                            <span
+                                class="text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase mt-[-2px]">{{
+                                mtd_range }} vs {{ prev_range }}</span>
+                        </div>
+                        {% if month_offset > 0 %}
+                        <a href="{{ url_for('index', offset=month_offset - 1) }}"
+                            class="p-2 hover:bg-white dark:hover:bg-slate-600 rounded-md transition-colors text-gray-500 dark:text-gray-300 hover:text-primary"><i
+                                class="fas fa-chevron-right"></i></a>
+                        {% else %}
+                        <span class="p-2 text-gray-300 dark:text-gray-600 cursor-not-allowed"><i
+                                class="fas fa-chevron-right"></i></span>
+                        {% endif %}
+                    </div>
+                    <div
+                        class="live-badge flex items-center gap-2 px-4 py-1.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full border border-green-200 dark:border-green-800 shadow-sm">
+                        <span class="pulse w-2.5 h-2.5 bg-green-500 rounded-full"></span>
+                        <span class="font-bold text-sm">{{ active_users }} Live Users</span>
+                    </div>
+                    <!-- Refresh Button -->
+                    <button id="refresh-btn" onclick="refreshAll()" title="Refresh all data"
+                        class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-slate-700 text-blue-600 dark:text-blue-400 rounded-full border border-blue-200 dark:border-slate-600 hover:bg-blue-100 dark:hover:bg-slate-600 transition-colors text-sm font-semibold shadow-sm">
+                        <i id="refresh-icon" class="fas fa-sync-alt text-xs"></i>
+                        <span id="refresh-label">Refresh</span>
+                    </button>
+                    <span id="last-updated" class="text-xs text-gray-400 dark:text-gray-500 hidden"></span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Tabs -->
+        <div class="mb-8">
+            <div class="border-b border-gray-200 dark:border-slate-700">
+                <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                    {% for tab in ['DISCOVER', 'TRY', 'BUY', 'USE', 'RENEW', 'ADVOCATE'] %}
+                    <button
+                        class="tab-link {{ 'border-primary text-primary dark:border-blue-400 dark:text-blue-400' if loop.index0 == 0 else 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-slate-600' }} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors"
+                        onclick="openTab(event, '{{ tab }}')">
+                        {{ tab }}
+                    </button>
+                    {% endfor %}
+                </nav>
+            </div>
+        </div>
+
+        <!-- Tab Content: DISCOVER -->
+        <div id="DISCOVER" class="tab-content block fade-in">
+            <div class="flex items-center gap-2 mb-6">
+                <div class="w-1 h-6 bg-blue-500 rounded-full"></div>
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white">Acquisition & Awareness</h2>
+            </div>
+
+            <!-- Skeleton/Content Container -->
+            <div id="discover-skeleton" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+            </div>
+
+            <div id="discover-content" class="content-loaded">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden card-hover">
+                        <div class="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                        <p class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">New
+                            Users (Month-to-Date)</p>
+                        <h3 class="text-4xl font-extrabold text-gray-900 dark:text-white mb-2" id="d-m1-val">...</h3>
+                        <div id="d-delta-badge"
+                            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium">...</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden card-hover">
+                        <div class="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                        <p class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Previous MTD Users</p>
+                        <h3 class="text-4xl font-extrabold text-gray-900 dark:text-white mb-2" id="d-m2-val">...</h3>
+                    </div>
+                    <!-- Worm Graph Summary Card -->
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden card-hover">
+                        <div class="absolute top-0 left-0 w-1 h-full bg-purple-500"></div>
+                        <p class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Growth Pace</p>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Tracking against last month
+                        </h3>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">See chart below for daily cumulative
+                            comparison.</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-8 mb-8">
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">User
+                            Acquisition Trend (Daily)</h4>
+                        <div id="trendChart" class="w-full h-80"></div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">
+                            Cumulative Growth (Worm Graph)</h4>
+                        <div id="wormChart" class="w-full h-80"></div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                    <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Top
+                        Channels</h4>
+                    <div id="sources-table" class="overflow-x-auto"></div>
+                </div>
+
+                <!-- Content Calendar Section -->
+                <div class="mt-8">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-1 h-5 bg-indigo-500 rounded-full"></div>
+                        <h4 class="text-sm font-bold text-gray-700 dark:text-white uppercase tracking-wide">Content
+                            Calendar — This Month</h4>
+                        <span id="cc-loading" class="ml-2 text-xs text-gray-400 animate-pulse">Loading…</span>
+                    </div>
+
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" id="cc-kpi-cards">
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                            <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                                Total Scheduled</p>
+                            <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white" id="cc-total">—</h3>
+                        </div>
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-1 h-full bg-green-500"></div>
+                            <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                                Published</p>
+                            <h3 class="text-3xl font-extrabold text-green-600 dark:text-green-400" id="cc-published">—
+                            </h3>
+                        </div>
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
+                            <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                                Pending</p>
+                            <h3 class="text-3xl font-extrabold text-red-500 dark:text-red-400" id="cc-pending">—</h3>
+                        </div>
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-1 h-full bg-blue-400"></div>
+                            <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                                Publish Rate</p>
+                            <h3 class="text-3xl font-extrabold text-blue-500 dark:text-blue-400" id="cc-rate">—</h3>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <!-- Course Progress -->
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-5">
+                            <h5 class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">
+                                By Course</h5>
+                            <div id="cc-courses" class="space-y-3"></div>
+                        </div>
+                        <!-- Funnel Stage Breakdown -->
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-5">
+                            <h5 class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">
+                                By Funnel Stage</h5>
+                            <div id="cc-funnel" class="space-y-3"></div>
+                        </div>
+                    </div>
+
+                    <!-- Scrollable Content Items List -->
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h5 class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                                Content Items</h5>
+                            <div class="flex gap-2">
+                                <select id="cc-filter-status"
+                                    class="text-xs border border-gray-200 dark:border-slate-600 rounded-lg px-2 py-1 bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 focus:outline-none">
+                                    <option value="">All Status</option>
+                                    <option value="Published">Published</option>
+                                    <option value="Pending">Pending</option>
+                                    <option value="Assigned">Assigned</option>
+                                </select>
+                                <select id="cc-filter-course"
+                                    class="text-xs border border-gray-200 dark:border-slate-600 rounded-lg px-2 py-1 bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 focus:outline-none">
+                                    <option value="">All Courses</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="cc-items" class="overflow-y-auto max-h-96 space-y-2"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+
+        <div id="TRY" class="tab-content hidden">
+            <div class="p-8 text-center text-gray-500 dark:text-gray-400">HubSpot Lead Integration Pending</div>
+        </div>
+
+        <!-- Tab Content: BUY -->
+        <div id="BUY" class="tab-content hidden fade-in">
+            <div id="buy-skeleton" class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+            </div>
+            <div id="buy-content" class="content-loaded">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden"
+                        style="border-left: 4px solid #f97316;">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Admissions (MTD)</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="b-m1-count">...</h3>
+                        <div id="b-delta-count" class="text-xs font-medium">...</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Prev
+                            MTD Admissions</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="b-m2-count">...</h3>
+                    </div>
+                    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden"
+                        style="border-left: 4px solid #f97316;">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Revenue (MTD)</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="b-m1-val">...</h3>
+                        <div id="b-pct-val" class="text-xs font-medium">...</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Prev
+                            MTD Revenue</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="b-m2-val">...</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BUY Worm Graph -->
+            <div
+                class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 mb-8">
+                <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Cumulative
+                    Admissions Growth</h4>
+                <div id="buyWormChart" class="w-full h-80"></div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Tab Content: USE -->
+        <div id="USE" class="tab-content hidden fade-in">
+            <div id="use-skeleton" class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-4 h-32 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-4 h-32 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-4 h-32 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-4 h-32 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-4 h-32 skeleton"></div>
+            </div>
+            <div id="use-content" class="content-loaded">
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 border-l-4 border-indigo-500">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Total
+                            Customers</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-white" id="u-total">...</h3>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 border-l-4 border-indigo-500">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">New
+                            Cust. (MTD)</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-white" id="u-m1-new">...</h3>
+                        <span class="text-xs font-medium" id="u-new-delta">...</span>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Prev
+                            MTD Cust.</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-white" id="u-m2-new">...</h3>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 border-l-4 border-indigo-500">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Revenue (MTD)</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-white" id="u-m1-rev">...</h3>
+                        <span class="text-xs font-medium text-gray-500 dark:text-gray-400" id="u-rev-delta">...</span>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 border-l-4 border-indigo-500">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Active Learners</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-white" id="u-active">...</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- USE Worm Graph -->
+            <div
+                class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 mb-8">
+                <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Cumulative
+                    New Customer Growth</h4>
+                <div id="useWormChart" class="w-full h-80"></div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div
+                    class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                    <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Top
+                        Courses (All Time)</h4>
+                    <div id="u-products-table" class="overflow-x-auto"></div>
+                </div>
+                <div
+                    class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                    <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Top
+                        Courses (This Month)</h4>
+                    <div id="u-mtd-courses-table" class="overflow-x-auto"></div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Tab Content: RENEW -->
+        <div id="RENEW" class="tab-content hidden fade-in">
+            <div id="renew-skeleton" class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl p-6 h-40 skeleton"></div>
+            </div>
+            <div id="renew-content" class="content-loaded">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden"
+                        style="border-left: 4px solid #14b8a6;">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Renewals (MTD)</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="r-m1-count">...</h3>
+                        <div id="r-delta-count" class="text-xs font-medium">...</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Prev
+                            MTD Count</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="r-m2-count">...</h3>
+                    </div>
+                    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 relative overflow-hidden"
+                        style="border-left: 4px solid #14b8a6;">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">
+                            Renewal Revenue</p>
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="r-m1-val">...</h3>
+                        <div id="r-pct-val" class="text-xs font-medium">...</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Prev
+                        <h3 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-1" id="r-m2-val">...</h3>
+                    </div>
+                </div>
+
+                <!-- DEBUG BREAKDOWNS v2.2 -->
+                <div id="debug-renew-section"
+                    class="mb-8 mt-10 p-6 bg-gray-50 dark:bg-slate-900 rounded-2xl border-2 border-dashed border-primary/30">
+                    <div class="flex justify-between items-center mb-6">
+                        <h4 class="text-sm font-black text-primary dark:text-blue-400 uppercase tracking-widest">Renewal
+                            Breakdown Analysis</h4>
+                        <span id="r-v-check"
+                            class="px-2 py-0.5 bg-primary/10 text-primary text-[10px] rounded-full font-bold">Checking...</span>
+                    </div>
+
+                    <div class="space-y-8">
+                        <div>
+                            <p class="text-[10px] font-bold text-gray-400 uppercase mb-3 px-1">By Course</p>
+                            <div id="r-course-breakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            </div>
+                        </div>
+
+                        <div class="pt-6 border-t border-gray-100 dark:border-slate-800">
+                            <p class="text-[10px] font-bold text-gray-400 uppercase mb-3 px-1">By Package</p>
+                            <div id="r-package-breakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                    <h4 class="text-sm font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-4">Recent
+                        Renewals</h4>
+                    <div id="r-table" class="overflow-x-auto"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="ADVOCATE" class="tab-content hidden">
+            <div class="p-8 text-center text-gray-500 dark:text-gray-400">Advocate Phase Pending</div>
+        </div>
+    </main>
+
+    <script>
+        const offset = parseInt("{{ month_offset }}") || 0;
+
+        // Dark Mode Logic
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const isDark = html.classList.toggle('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+
+            // Re-render charts to update colors
+            if (window.lastDiscoverData) renderDiscoverCharts(window.lastDiscoverData);
+            if (window.lastBuyData) renderBuyCharts(window.lastBuyData);
+            if (window.lastUseData) renderUseCharts(window.lastUseData);
+        }
+
+        // Init Theme
+        (function () {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        })();
+
+        // Tab Logic
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" border-primary text-primary dark:border-blue-400 dark:text-blue-400", " border-transparent text-gray-500 dark:text-gray-400");
+            }
+            document.getElementById(tabName).style.display = "block";
+
+            // Highlight active tab
+            evt.currentTarget.className = evt.currentTarget.className.replace(" border-transparent text-gray-500 dark:text-gray-400", " border-primary text-primary dark:border-blue-400 dark:text-blue-400");
+
+            // Trigger fetch
+            if (tabName === 'DISCOVER') fetchDiscover();
+            if (tabName === 'BUY') fetchBuy();
+            if (tabName === 'USE') fetchUse();
+            if (tabName === 'RENEW') fetchRenew();
+        }
+
+        // Generic Helper for Worm Chart
+        function renderWormChart(elemId, dataCurr, dataPrev, isDark, textColor, gridColor, lineCol = '#10b981') {
+            if (dataCurr && dataPrev) {
+                const traceCurrent = {
+                    x: dataCurr.map((d, i) => i + 1),
+                    y: dataCurr.map(d => d.Cumulative),
+                    name: '<b>This Month</b>',
+                    type: 'scatter', mode: 'lines',
+                    line: { color: lineCol, width: 4, shape: 'spline' }
+                };
+                const tracePrev = {
+                    x: dataPrev.map((d, i) => i + 1),
+                    y: dataPrev.map(d => d.Cumulative),
+                    name: '<b>Last Month (Full)</b>',
+                    type: 'scatter', mode: 'lines',
+                    // Updated color to be more distinct (Purple) instead of gray
+                    line: { color: '#a855f7', width: 2.5, dash: 'dot', shape: 'spline' }
+                };
+
+                Plotly.newPlot(elemId, [tracePrev, traceCurrent], {
+                    margin: { l: 30, r: 10, t: 30, b: 30 },
+                    showlegend: true, legend: { x: 0, y: 1.1, orientation: 'h', font: { color: textColor, size: 12 } },
+                    xaxis: { title: '<b>Day of Month</b>', showgrid: false, color: textColor },
+                    yaxis: { showgrid: true, gridcolor: gridColor, color: textColor },
+                    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', height: 320,
+                    font: { family: 'Inter, sans-serif' }
+                }, { displayModeBar: false, responsive: true });
+            }
+        }
+
+        // Render Functions
+        function renderDiscoverCharts(data) {
+            window.lastDiscoverData = data;
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#f3f4f6' : '#1f2937';
+            const gridColor = isDark ? '#334155' : '#f3f4f6';
+
+            // 1. Trend Chart
+            const trace1 = {
+                x: data.trend.map(d => d.Date),
+                y: data.trend.map(d => d['New Users']),
+                type: 'scatter', mode: 'lines',
+                fill: 'tozeroy',
+                line: { color: '#3b82f6', width: 3, shape: 'spline', smoothing: 1.3 },
+                fillcolor: 'rgba(59, 130, 246, 0.1)'
+            };
+            Plotly.newPlot('trendChart', [trace1], {
+                margin: { l: 30, r: 10, t: 10, b: 30 }, showlegend: false,
+                xaxis: { showgrid: false, color: textColor },
+                yaxis: { showgrid: true, gridcolor: gridColor, color: textColor },
+                paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', height: 320
+            }, { displayModeBar: false, responsive: true });
+
+            // 2. Worm Graph
+            renderWormChart('wormChart', data.worm_m1, data.worm_m2, isDark, textColor, gridColor);
+        }
+
+        function renderBuyCharts(data) {
+            window.lastBuyData = data;
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#f3f4f6' : '#1f2937';
+            const gridColor = isDark ? '#334155' : '#f3f4f6';
+
+            renderWormChart('buyWormChart', data.worm_m1, data.worm_m2, isDark, textColor, gridColor, '#f97316'); // Orange for Buy
+        }
+
+        function renderUseCharts(data) {
+            window.lastUseData = data;
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#f3f4f6' : '#1f2937';
+            const gridColor = isDark ? '#334155' : '#f3f4f6';
+
+            renderWormChart('useWormChart', data.worm_m1, data.worm_m2, isDark, textColor, gridColor, '#6366f1'); // Indigo for Use
+        }
+
+        async function fetchDiscover() {
+            if (window.discoverLoaded) return;
+            const res = await fetch(`/api/discover?offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById('d-m1-val').innerText = data.m1_val;
+            document.getElementById('d-m2-val').innerText = data.m2_val;
+
+            const badge = document.getElementById('d-delta-badge');
+            badge.innerText = `${data.delta_pct >= 0 ? '+' : ''}${data.delta_pct.toFixed(1)}% vs Last Month`;
+            badge.className = `inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${data.delta_pct >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`;
+
+            // Table
+            let html = '<table class="min-w-full"><thead><tr class="text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-slate-700"><th class="pb-3 text-left">SOURCE</th><th class="pb-3 text-right">VOLUME</th></tr></thead><tbody>';
+            data.sources.forEach(row => {
+                html += `<tr class="border-b border-gray-50 dark:border-slate-800 last:border-0 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"><td class="py-3 text-gray-600 dark:text-gray-300 font-medium">${row.Channel}</td><td class="py-3 text-right text-primary dark:text-blue-400 font-bold">${row['New Users']}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('sources-table').innerHTML = html;
+
+            document.getElementById('discover-skeleton').style.display = 'none';
+            document.getElementById('discover-content').style.display = 'block';
+            // Render charts AFTER container is visible so Plotly gets correct dimensions
+            requestAnimationFrame(() => {
+                renderDiscoverCharts(data);
+            });
+            window.discoverLoaded = true;
+
+            // Also load content calendar in parallel
+            fetchContentCalendar();
+        }
+
+        // ---- CONTENT CALENDAR ----
+        let _ccAllRows = [];
+
+        function renderCCItems() {
+            const statusFilter = document.getElementById('cc-filter-status').value;
+            const courseFilter = document.getElementById('cc-filter-course').value;
+            const STATUS_COLORS = {
+                'Published': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
+                'Pending': 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
+                'Assigned': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
+                'Unset': 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-400',
+            };
+            const FUNNEL_COLORS = {
+                'Awareness': 'text-blue-600 dark:text-blue-400',
+                'Consideration': 'text-indigo-600 dark:text-indigo-400',
+                'Conversion': 'text-orange-600 dark:text-orange-400',
+                'Retention': 'text-green-600 dark:text-green-400',
+            };
+            const filtered = _ccAllRows.filter(r => {
+                if (statusFilter && r.status !== statusFilter) return false;
+                if (courseFilter && r.sheet !== courseFilter) return false;
+                return true;
+            });
+            const container = document.getElementById('cc-items');
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="text-sm text-gray-400 py-6 text-center">No items match your filters.</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(r => {
+                const statusCls = STATUS_COLORS[r.status] || STATUS_COLORS['Unset'];
+                const funnelCls = FUNNEL_COLORS[r.funnel] || 'text-gray-500';
+                const links = [
+                    r.link_yt ? `<a href="${r.link_yt}"    target="_blank" class="text-red-500 hover:underline text-xs font-medium">YT</a>` : '',
+                    r.link_insta ? `<a href="${r.link_insta}" target="_blank" class="text-pink-500 hover:underline text-xs font-medium">IG</a>` : '',
+                    r.link_fb ? `<a href="${r.link_fb}"    target="_blank" class="text-blue-500 hover:underline text-xs font-medium">FB</a>` : '',
+                ].filter(Boolean).join(' ');
+                return `
+                    <div class="flex items-start justify-between gap-3 py-2.5 px-3 rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 transition-colors border border-gray-100 dark:border-slate-600">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                                <span class="text-xs font-bold text-gray-500 dark:text-gray-400">${r.sheet}</span>
+                                <span class="text-xs ${funnelCls} font-medium">${r.funnel}</span>
+                                ${r.date ? `<span class="text-xs text-gray-400">${r.date}</span>` : ''}
+                            </div>
+                            <p class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">${r.topic || r.type || '(No topic)'}</p>
+                            ${r.owner ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">👤 ${r.owner}</p>` : ''}
+                            ${r.remarks ? `<p class="text-xs text-orange-500 mt-0.5">⚠ ${r.remarks}</p>` : ''}
+                        </div>
+                        <div class="flex flex-col items-end gap-1.5 shrink-0">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${statusCls}">${r.status}</span>
+                            ${links ? `<div class="flex gap-1.5">${links}</div>` : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        async function fetchContentCalendar() {
+            if (window.ccLoaded) return;
+            try {
+                const res = await fetch(`/api/content-calendar?offset=${offset}`);
+                const data = await res.json();
+                _ccAllRows = data.rows || [];
+
+                // KPIs
+                document.getElementById('cc-total').innerText = data.total;
+                document.getElementById('cc-published').innerText = data.published;
+                document.getElementById('cc-pending').innerText = data.pending;
+                document.getElementById('cc-rate').innerText = `${data.publish_rate}%`;
+                document.getElementById('cc-loading').style.display = 'none';
+
+                // Course Progress Bars
+                const maxTotal = Math.max(...(data.courses || []).map(c => c.total), 1);
+                document.getElementById('cc-courses').innerHTML = (data.courses || []).map(c => {
+                    const pubPct = Math.round(c.published / c.total * 100);
+                    return `
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300 truncate max-w-[70%]">${c.name}</span>
+                                <span class="text-xs text-gray-500">${c.published}/${c.total} <span class="text-green-600 font-semibold">(${pubPct}%)</span></span>
+                            </div>
+                            <div class="w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
+                                <div class="bg-green-500 h-2 rounded-full" style="width:${pubPct}%"></div>
+                            </div>
+                        </div>`;
+                }).join('');
+
+                // Funnel Stage Bars
+                const maxFunnel = Math.max(...(data.funnel || []).map(f => f.count), 1);
+                const funnelColors = { 'Awareness': '#3b82f6', 'Consideration': '#6366f1', 'Conversion': '#f97316', 'Retention': '#10b981' };
+                document.getElementById('cc-funnel').innerHTML = (data.funnel || []).map(f => {
+                    const pct = Math.round(f.count / maxFunnel * 100);
+                    const col = funnelColors[f.stage] || '#6b7280';
+                    return `
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300">${f.stage}</span>
+                                <span class="text-xs font-bold text-gray-700 dark:text-gray-300">${f.count}</span>
+                            </div>
+                            <div class="w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
+                                <div class="h-2 rounded-full" style="width:${pct}%; background:${col}"></div>
+                            </div>
+                        </div>`;
+                }).join('');
+
+                // Populate course filter dropdown
+                const courseSelect = document.getElementById('cc-filter-course');
+                (data.courses || []).forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.name; opt.textContent = c.name;
+                    courseSelect.appendChild(opt);
+                });
+
+                // Filter listeners
+                document.getElementById('cc-filter-status').addEventListener('change', renderCCItems);
+                document.getElementById('cc-filter-course').addEventListener('change', renderCCItems);
+
+                // Render items list
+                renderCCItems();
+                window.ccLoaded = true;
+            } catch (e) {
+                document.getElementById('cc-loading').innerText = 'Failed to load';
+            }
+        }
+
+
+        async function fetchBuy() {
+            if (window.buyLoaded) return;
+            const res = await fetch(`/api/buy?offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById('b-m1-count').innerText = data.m1_count;
+            document.getElementById('b-m2-count').innerText = data.m2_count;
+            document.getElementById('b-m1-val').innerText = data.m1_val;
+            document.getElementById('b-m2-val').innerText = data.m2_val;
+
+            const dc = document.getElementById('b-delta-count');
+            dc.innerText = `${data.delta_count} vs Last Month`;
+            dc.className = `text-xs font-medium ${parseInt(data.delta_count) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`;
+
+            const dp = document.getElementById('b-pct-val');
+            dp.innerText = `${data.pct_val >= 0 ? '+' : ''}${data.pct_val.toFixed(1)}% vs Last Month`;
+            dp.className = `text-xs font-medium ${data.pct_val >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`;
+
+            document.getElementById('buy-skeleton').style.display = 'none';
+            document.getElementById('buy-content').style.display = 'block';
+            // Render charts AFTER container is visible so Plotly gets correct dimensions
+            requestAnimationFrame(() => {
+                renderBuyCharts(data);
+            });
+            window.buyLoaded = true;
+        }
+
+        async function fetchUse() {
+            if (window.useLoaded) return;
+            const res = await fetch(`/api/use?offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById('u-total').innerText = data.total_customers;
+            document.getElementById('u-m1-new').innerText = data.m1_new;
+            document.getElementById('u-m2-new').innerText = data.m2_new;
+            document.getElementById('u-m1-rev').innerText = data.m1_rev;
+            document.getElementById('u-active').innerText = data.active_learners;
+
+            document.getElementById('u-new-delta').innerText = data.new_delta;
+            document.getElementById('u-new-delta').className = `text-xs font-medium ${parseInt(data.new_delta) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`;
+
+            document.getElementById('u-rev-delta').innerText = data.rev_delta;
+
+            // Products Table
+            const renderTable = (items, keyName, valName) => {
+                if (!items || items.length === 0) return '<div class="text-gray-400 text-sm p-4">No data</div>';
+                let html = '<table class="min-w-full"><thead><tr class="text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-slate-700"><th class="pb-3 text-left">COURSE</th><th class="pb-3 text-right">STUDENTS</th></tr></thead><tbody>';
+                const maxVal = Math.max(...items.map(i => i[valName]));
+                items.forEach(i => {
+                    const width = maxVal > 0 ? (i[valName] / maxVal * 100) : 0;
+                    html += `<tr class="border-b border-gray-50 dark:border-slate-800 last:border-0 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"><td class="py-3 text-gray-700 dark:text-gray-300 font-medium">${i[keyName]}</td><td class="py-3 text-right"><div class="flex items-center justify-end gap-2"><span class="font-bold text-indigo-600 dark:text-indigo-400">${i[valName]}</span><div class="w-16 h-1.5 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden"><div class="h-full bg-indigo-500 rounded-full" style="width: ${width}%"></div></div></div></td></tr>`;
+                });
+                return html + '</tbody></table>';
+            };
+
+            document.getElementById('u-products-table').innerHTML = renderTable(data.products, 'Name', 'Members');
+            document.getElementById('u-mtd-courses-table').innerHTML = renderTable(data.mtd_courses, 'Course', 'Enrollments');
+
+            document.getElementById('use-skeleton').style.display = 'none';
+            document.getElementById('use-content').style.display = 'block';
+            // Render charts AFTER container is visible so Plotly gets correct dimensions
+            requestAnimationFrame(() => {
+                renderUseCharts(data);
+            });
+            window.useLoaded = true;
+        }
+
+        async function fetchRenew() {
+            if (window.renewLoaded) return;
+            const res = await fetch(`/api/renew?offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById('r-m1-count').innerText = data.m1_count;
+            document.getElementById('r-m2-count').innerText = data.m2_count;
+            document.getElementById('r-m1-val').innerText = data.m1_val;
+            document.getElementById('r-m2-val').innerText = data.m2_val;
+
+            const dc = document.getElementById('r-delta-count');
+            dc.innerText = `${data.delta_count} vs Last Month`;
+            dc.className = `text-xs font-medium ${parseInt(data.delta_count) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`;
+
+            const dp = document.getElementById('r-pct-val');
+            dp.innerText = `${data.pct_val >= 0 ? '+' : ''}${data.pct_val.toFixed(1)}% vs Last Month`;
+            dp.className = `text-xs font-medium ${data.pct_val >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`;
+
+            // Table
+            let html = '';
+            if (data.recent_renewals.length > 0) {
+                html = '<div class="overflow-x-auto"><table class="min-w-full"><thead><tr class="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-slate-700"><th class="pb-3 text-left">Student</th><th class="pb-3 text-left">Course</th><th class="pb-3 text-left">Package</th><th class="pb-3 text-left">Owner</th><th class="pb-3 text-right">Fee</th><th class="pb-3 text-right">Paid</th><th class="pb-3 text-right">Pending</th><th class="pb-3 text-right">Paid Date</th><th class="pb-3 text-right">Pend. Date</th></tr></thead><tbody>';
+                data.recent_renewals.forEach(r => {
+                    const formatDate = (d) => {
+                        if (!d) return '—';
+                        try {
+                            const date = new Date(d);
+                            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+                        } catch (e) { return d; }
+                    };
+
+                    html += `<tr class="border-b border-gray-50 dark:border-slate-800 last:border-0 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+                        <td class="py-3 text-sm text-gray-700 dark:text-gray-300 font-semibold">${r['Student Name'] || '—'}</td>
+                        <td class="py-3 text-xs text-gray-500 dark:text-gray-400">${r.Course || '—'}</td>
+                        <td class="py-3 text-xs text-gray-400 dark:text-gray-500">${r.Package || '—'}</td>
+                        <td class="py-3 text-xs text-gray-400 dark:text-gray-500">${r['Lead Owner'] || '—'}</td>
+                        <td class="py-3 text-right text-xs font-bold text-teal-600 dark:text-teal-400">₹${(r['Fee Amount'] || 0).toLocaleString()}</td>
+                        <td class="py-3 text-right text-xs text-green-600 dark:text-green-500">₹${(r['Paid Amount'] || 0).toLocaleString()}</td>
+                        <td class="py-3 text-right text-xs text-red-500">₹${(r['Pending Amount'] || 0).toLocaleString()}</td>
+                        <td class="py-3 text-right text-[10px] text-gray-400">${formatDate(r['Payment Paid Date/ Initial Amount Paid Date'])}</td>
+                        <td class="py-3 text-right text-[10px] text-gray-400">${formatDate(r['Pending Paid Date'])}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table></div>';
+            } else {
+                html = '<div class="flex h-40 items-center justify-center text-gray-400 text-sm">No renewals found for this period.</div>';
+            }
+            document.getElementById('r-table').innerHTML = html;
+
+            document.getElementById('renew-skeleton').style.display = 'none';
+            document.getElementById('renew-content').style.display = 'block';
+
+            if (data.v) document.getElementById('r-v-check').innerHTML = `API v${data.v}`;
+            console.log("Renew Data Received:", data);
+            window.lastRenewData = data;
+
+            // Render Comparison Breakdowns Safely
+            const renderBreakdown = (id, currentItems, prevItems) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+
+                const allNames = new Set();
+                const curMap = {};
+                const prevMap = {};
+
+                (currentItems || []).forEach(i => { allNames.add(i.name); curMap[i.name] = i.count; });
+                (prevItems || []).forEach(i => { allNames.add(i.name); prevMap[i.name] = i.count; });
+
+                if (allNames.size === 0) {
+                    el.innerHTML = '<div class="col-span-full text-xs text-gray-400 italic py-6 text-center bg-gray-50/50 dark:bg-slate-800/50 rounded-lg">No renewal data available</div>';
+                    return;
+                }
+
+                const sortedNames = Array.from(allNames).sort((a, b) => (curMap[b] || 0) - (curMap[a] || 0));
+                const max = Math.max(...Object.values(curMap), ...Object.values(prevMap), 1);
+
+                el.innerHTML = sortedNames.map(name => {
+                    const c = curMap[name] || 0;
+                    const p = prevMap[name] || 0;
+                    const diff = c - p;
+                    const diffColor = diff > 0 ? 'text-green-500' : (diff < 0 ? 'text-red-500' : 'text-gray-400');
+                    return `
+                        <div class="p-3 bg-white dark:bg-slate-800 rounded-lg border border-gray-100 dark:border-slate-700/50 shadow-sm hover:border-primary/30 transition-colors">
+                            <div class="flex justify-between items-start text-[11px] mb-2">
+                                <span class="font-semibold text-gray-700 dark:text-gray-300 truncate pr-2" title="${name}">${name}</span>
+                                <div class="text-right">
+                                    <div class="flex items-center gap-1">
+                                        <span class="font-bold text-primary dark:text-blue-400 text-sm">${c}</span>
+                                        <span class="text-[9px] font-medium ${diffColor}">${diff > 0 ? '↑' : (diff < 0 ? '↓' : '')}${Math.abs(diff)}</span>
+                                    </div>
+                                    <div class="text-[9px] text-gray-400">Prev: ${p}</div>
+                                </div>
+                            </div>
+                            <div class="w-full bg-gray-100 dark:bg-slate-700/50 rounded-full h-1.5 overflow-hidden relative">
+                                <div class="absolute left-0 top-0 bg-gray-300 dark:bg-slate-600 h-full opacity-30" style="width: ${(p / max * 100)}%"></div>
+                                <div class="bg-primary dark:bg-blue-500 h-full rounded-full transition-all duration-1000 ease-out relative z-10" style="width: ${(c / max * 100)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            };
+
+            renderBreakdown('r-course-breakdown', data.m1_course_breakdown, data.m2_course_breakdown);
+            renderBreakdown('r-package-breakdown', data.m1_package_breakdown, data.m2_package_breakdown);
+
+            window.renewLoaded = true;
+        }
+
+        function updateLastUpdatedTime() {
+            const now = new Date();
+            const ts = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+            const updEl = document.getElementById('last-updated');
+            updEl.innerText = `Updated at ${ts}`;
+            updEl.classList.remove('hidden');
+        }
+
+        // ---- REFRESH ALL ----
+        async function refreshAll() {
+            const btn = document.getElementById('refresh-btn');
+            const icon = document.getElementById('refresh-icon');
+            const label = document.getElementById('refresh-label');
+
+            // Disable button & spin
+            btn.disabled = true;
+            btn.classList.add('opacity-60', 'pointer-events-none');
+            icon.classList.add('animate-spin');
+            label.innerText = 'Refreshing…';
+
+            try {
+                // 1. Clear server-side cache
+                await fetch('/api/cache-clear', { method: 'POST' });
+
+                // 2. Reset all loaded flags
+                window.discoverLoaded = false;
+                window.buyLoaded = false;
+                window.useLoaded = false;
+                window.renewLoaded = false;
+                window.ccLoaded = false;
+
+                // 3. Show skeletons, hide content
+                ['discover', 'buy', 'use', 'renew'].forEach(tab => {
+                    const skel = document.getElementById(tab + '-skeleton');
+                    const cont = document.getElementById(tab + '-content');
+                    if (skel) skel.style.display = '';
+                    if (cont) cont.style.display = 'none';
+                });
+
+                // 4. Re-fetch all tabs in parallel
+                await Promise.allSettled([
+                    fetchDiscover(),
+                    fetchBuy(),
+                    fetchUse(),
+                    fetchRenew(),
+                ]);
+
+                // 5. Show updated timestamp
+                updateLastUpdatedTime();
+            } catch (e) {
+                console.error('Refresh failed:', e);
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-60', 'pointer-events-none');
+                icon.classList.remove('animate-spin');
+                label.innerText = 'Refresh';
+            }
+        }
+
+        // Auto-refresh disabled per user request
+        // setInterval(refreshAll, 5 * 60 * 1000);
+
+        // Init — prefetch ALL tabs in parallel so switching is instant
+        document.addEventListener('DOMContentLoaded', () => {
+            // Fetch active users count asynchronously
+            fetch('/api/active-users')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.querySelector('.live-badge .font-bold');
+                    if (badge) badge.innerText = d.count + ' Live Users';
+                })
+                .catch(() => { });
+
+            // Only fetch Discover tab on initial load to avoid overloading the server
+            // Other tabs will fetch on-demand when the user clicks them
+            fetchDiscover();
+
+            updateLastUpdatedTime();
+            // Content calendar fires from inside fetchDiscover already
+        });
+    </script>
+</body>
+
+</html>
