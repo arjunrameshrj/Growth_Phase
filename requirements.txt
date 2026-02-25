@@ -7,3 +7,4 @@ google-analytics-data
 google-auth
 requests
 pytz
+gunicorn
